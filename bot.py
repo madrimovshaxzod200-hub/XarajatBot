@@ -213,15 +213,32 @@ async def expense_category(message: types.Message, state: FSMContext):
 
         await state.clear()
 
-=== OXIRGI CHIQIMNI O‘CHIRISH =================
+# ================= O‘CHIRISH TASDIQLASH MENYUSI =================
+
+confirm_delete_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="✅ Ha"), KeyboardButton(text="❌ Yo‘q")]
+    ],
+    resize_keyboard=True
+)
+
+
+# ================= DELETE STATE =================
+
+class DeleteState(StatesGroup):
+    confirm = State()
+
+
+# ================= OXIRGI CHIQIMNI TEKSHIRISH =================
 
 @dp.message(F.text == "❌ Oxirgi chiqimni bekor qilish")
-async def delete_last_expense(message: types.Message):
+async def delete_last_expense(message: types.Message, state: FSMContext):
 
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute("""
-        SELECT id FROM expenses
+        SELECT id, category, amount, date, time
+        FROM expenses
         WHERE user_id=?
         ORDER BY id DESC
         LIMIT 1
@@ -229,22 +246,59 @@ async def delete_last_expense(message: types.Message):
 
         expense = await cur.fetchone()
 
-        if not expense:
-            await message.answer(
-                "⚠️ Sizda hali chiqimlar mavjud emas",
-                reply_markup=main_menu
-            )
-            return
-
-        await db.execute(
-            "DELETE FROM expenses WHERE id=?",
-            (expense[0],)
+    if not expense:
+        await message.answer(
+            "⚠️ Sizda hali chiqimlar mavjud emas",
+            reply_markup=main_menu
         )
+        return
 
+    exp_id, category, amount, date, time = expense
+
+    await state.update_data(delete_id=exp_id)
+    await state.set_state(DeleteState.confirm)
+
+    text = (
+        "⚠️ Oxirgi chiqim:\n\n"
+        f"📅 Sana: {date}\n"
+        f"⏰ Vaqt: {time}\n"
+        f"📦 Sabab: {category}\n"
+        f"💰 Summa: {amount:,} so‘m\n\n"
+        "Shu chiqim o‘chirilsinmi?"
+    )
+
+    await message.answer(text, reply_markup=confirm_delete_menu)
+
+
+# ================= HA BOSILSA O‘CHIRISH =================
+
+@dp.message(DeleteState.confirm, F.text == "✅ Ha")
+async def confirm_delete(message: types.Message, state: FSMContext):
+
+    data = await state.get_data()
+    exp_id = data.get("delete_id")
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("DELETE FROM expenses WHERE id=?", (exp_id,))
         await db.commit()
 
-        await message.answer(
-        "✅ Oxirgi chiqim o‘chirildi",
+    await state.clear()
+
+    await message.answer(
+        "✅ Chiqim muvaffaqiyatli o‘chirildi",
+        reply_markup=main_menu
+    )
+
+
+# ================= YO‘Q BOSILSA BEKOR =================
+
+@dp.message(DeleteState.confirm, F.text == "❌ Yo‘q")
+async def cancel_delete(message: types.Message, state: FSMContext):
+
+    await state.clear()
+
+    await message.answer(
+        "👌 O‘chirish bekor qilindi",
         reply_markup=main_menu
     )
 
