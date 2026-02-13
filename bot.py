@@ -362,15 +362,26 @@ async def expense_category(message: types.Message, state: FSMContext):
 
     await state.clear()
 
-# ================= OXIRGI CHIQIMNI O‘CHIRISH =================
+# ================= O‘CHIRISH TASDIQLASH MENYUSI =================
+
+confirm_delete_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="✅ Ha"), KeyboardButton(text="❌ Yo‘q")]
+    ],
+    resize_keyboard=True
+)
+
+
+# ================= OXIRGI CHIQIMNI TEKSHIRISH =================
 
 @dp.message(F.text == "❌ Oxirgi chiqimni bekor qilish")
-async def delete_last_expense(message: types.Message):
+async def delete_last_expense(message: types.Message, state: FSMContext):
 
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute("""
-        SELECT id FROM expenses
+        SELECT id, category, amount, date, time
+        FROM expenses
         WHERE user_id=?
         ORDER BY id DESC
         LIMIT 1
@@ -378,81 +389,69 @@ async def delete_last_expense(message: types.Message):
 
         expense = await cur.fetchone()
 
-        if not expense:
-            await message.answer(
-                "⚠️ Sizda hali chiqimlar mavjud emas",
-                reply_markup=main_menu
-            )
-            return
+    if not expense:
+        await message.answer(
+            "⚠️ Sizda hali chiqimlar mavjud emas",
+            reply_markup=main_menu
+        )
+        return
+
+    exp_id, category, amount, date, time = expense
+
+    # FSM ga saqlaymiz
+    await state.update_data(delete_id=exp_id)
+
+    text = (
+        "⚠️ Oxirgi chiqim:\n\n"
+        f"📅 Sana: {date}\n"
+        f"⏰ Vaqt: {time}\n"
+        f"📦 Sabab: {category}\n"
+        f"💰 Summa: {amount:,} so‘m\n\n"
+        "Shu chiqim o‘chirilsinmi?"
+    )
+
+    await message.answer(text, reply_markup=confirm_delete_menu)
+
+
+# ================= HA BOSILSA O‘CHIRISH =================
+
+@dp.message(F.text == "✅ Ha")
+async def confirm_delete(message: types.Message, state: FSMContext):
+
+    data = await state.get_data()
+    exp_id = data.get("delete_id")
+
+    if not exp_id:
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
 
         await db.execute(
             "DELETE FROM expenses WHERE id=?",
-            (expense[0],)
+            (exp_id,)
         )
 
         await db.commit()
 
+    await state.clear()
+
     await message.answer(
-        "✅ Oxirgi chiqim o‘chirildi",
+        "✅ Chiqim muvaffaqiyatli o‘chirildi",
         reply_markup=main_menu
     )
 
-# ================= HISOBOT MENYUSI =================
 
-report_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="📅 Kunlik hisobot")],
-        [KeyboardButton(text="📆 Oylik hisobot")],
-        [KeyboardButton(text="📊 Yillik hisobot")],
-        [KeyboardButton(text="⬅️ Ortga")]
-    ],
-    resize_keyboard=True
-)
+# ================= YO‘Q BOSILSA BEKOR =================
 
+@dp.message(F.text == "❌ Yo‘q")
+async def cancel_delete(message: types.Message, state: FSMContext):
 
-@dp.message(F.text == "📊 Hisobot")
-async def report_menu_open(message: types.Message):
-    await message.answer("Hisobot turini tanlang:", reply_markup=report_menu)
+    await state.clear()
 
-
-@dp.message(F.text == "⬅️ Ortga")
-async def back_main_menu(message: types.Message):
-    await message.answer("Bosh menyu", reply_markup=main_menu)
-
-
-# ================= KUNLIK HISOBOT =================
-
-@dp.message(F.text == "📅 Kunlik hisobot")
-async def daily_report(message: types.Message):
-
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        cur = await db.execute("""
-        SELECT category, SUM(amount)
-        FROM expenses
-        WHERE user_id=? AND date=?
-        GROUP BY category
-        """, (message.from_user.id, today))
-
-        data = await cur.fetchall()
-
-    if not data:
-        await message.answer("Bugun chiqimlar mavjud emas.")
-        return
-
-    text = "📅 Bugungi hisobot:\n\n"
-    total = 0
-
-    for cat, amount in data:
-        text += f"{cat} — {amount:,} so‘m\n"
-        total += amount
-
-    text += f"\n💰 Jami: {total:,} so‘m"
-
-    await message.answer(text)
-
+    await message.answer(
+        "👌 O‘chirish bekor qilindi",
+        reply_markup=main_menu
+    )
 
 # ================= OYLIK HISOBOT (OY RO‘YXATI) =================
 
