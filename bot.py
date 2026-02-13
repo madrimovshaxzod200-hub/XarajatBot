@@ -170,7 +170,7 @@ async def expense_category(message: types.Message, state: FSMContext):
     date = now.strftime("%Y-%m-%d")
     time = now.strftime("%H:%M")
 
-async with aiosqlite.connect(DB_NAME) as db:
+    async with aiosqlite.connect(DB_NAME) as db:
 
         # Expense saqlash
         await db.execute("""
