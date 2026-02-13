@@ -47,6 +47,10 @@ async def create_tables():
 
 
 async def add_user(user_id, username):
+
+    if username is None:
+        username = "NoUsername"
+
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute(
@@ -55,14 +59,19 @@ async def add_user(user_id, username):
         )
 
         user = await cur.fetchone()
+        await cur.close()
 
         if not user:
             await db.execute(
-                "INSERT INTO users VALUES (?, ?, ?)",
+                """
+                INSERT INTO users (user_id, username, created_at)
+                VALUES (?, ?, ?)
+                """,
                 (
                     user_id,
                     username,
                     datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
                 )
             )
+
             await db.commit()
