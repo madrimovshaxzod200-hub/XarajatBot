@@ -150,12 +150,12 @@ async def expense_amount(message: types.Message, state: FSMContext):
         resize_keyboard=True
     ) if keyboard else None
 
-await message.answer(
+    await message.answer(
         "Pul nimaga ishlatildi?",
         reply_markup=markup
     )
 
-await state.set_state(ExpenseState.category)
+    await state.set_state(ExpenseState.category)
 
 # ================= CHIQIMNI SAQLASH =================
 
@@ -243,7 +243,7 @@ async def delete_last_expense(message: types.Message):
 
         await db.commit()
 
-    await message.answer(
+        await message.answer(
         "✅ Oxirgi chiqim o‘chirildi",
         reply_markup=main_menu
     )
@@ -433,7 +433,7 @@ async def yearly_report(message: types.Message):
 
             text += "\n"
 
-    await message.answer(text)
+            await message.answer(text)
 
 # ================= ESLATMA MENYUSI =================
 
@@ -553,7 +553,7 @@ async def reminder_delete_confirm(message: types.Message):
 
         await db.commit()
 
-    await message.answer("✅ Eslatma o‘chirildi", reply_markup=reminder_menu)
+        await message.answer("✅ Eslatma o‘chirildi", reply_markup=reminder_menu)
 
 
 # ================= ESLATMA FON TEKSHIRUV =================
