@@ -213,7 +213,7 @@ async def expense_category(message: types.Message, state: FSMContext):
 
         await state.clear()
 
-# ================= OXIRGI CHIQIMNI O‘CHIRISH =================
+=== OXIRGI CHIQIMNI O‘CHIRISH =================
 
 @dp.message(F.text == "❌ Oxirgi chiqimni bekor qilish")
 async def delete_last_expense(message: types.Message):
@@ -247,6 +247,7 @@ async def delete_last_expense(message: types.Message):
         "✅ Oxirgi chiqim o‘chirildi",
         reply_markup=main_menu
     )
+
 
 # ================= HISOBOT MENYUSI =================
 
