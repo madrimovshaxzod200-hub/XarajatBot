@@ -451,6 +451,64 @@ async def cancel_delete(message: types.Message, state: FSMContext):
         reply_markup=main_menu
 )
 
+# ================= HISOBOT MENYUSI =================
+
+report_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📅 Kunlik hisobot")],
+        [KeyboardButton(text="📆 Oylik hisobot")],
+        [KeyboardButton(text="📊 Yillik hisobot")],
+        [KeyboardButton(text="⬅️ Ortga")]
+    ],
+    resize_keyboard=True
+)
+
+
+@dp.message(F.text == "📊 Hisobot")
+async def report_menu_open(message: types.Message):
+    await message.answer("Hisobot turini tanlang:", reply_markup=report_menu)
+
+
+@dp.message(F.text == "⬅️ Ortga")
+async def back_main_menu(message: types.Message):
+    await message.answer("Bosh menyu", reply_markup=main_menu)
+
+
+# ================= KUNLIK HISOBOT =================
+
+@dp.message(F.text == "📅 Kunlik hisobot")
+async def daily_report(message: types.Message):
+
+    today = datetime.datetime.now().strftime("%Y-%m-%d")
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        cur = await db.execute("""
+        SELECT category, SUM(amount)
+        FROM expenses
+        WHERE user_id=? AND date=?
+        GROUP BY category
+        """, (message.from_user.id, today))
+
+        data = await cur.fetchall()
+
+    if not data:
+        await message.answer("Bugun chiqimlar mavjud emas.")
+        return
+
+    text = "📅 Bugungi hisobot:\n\n"
+    total = 0
+
+    for cat, amount in data:
+        text += f"{cat} — {amount:,} so‘m\n"
+        total += amount
+
+    text += f"\n💰 Jami: {total:,} so‘m"
+
+    await message.answer(text)
+
+
+
 # ================= OYLIK HISOBOT (OY RO‘YXATI) =================
 
 @dp.message(F.text == "📆 Oylik hisobot")
