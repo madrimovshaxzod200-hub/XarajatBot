@@ -96,6 +96,120 @@ main_menu = ReplyKeyboardMarkup(
     resize_keyboard=True
 )
 
+ #================= ESLATMA MENYUSI =================
+
+reminder_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="➕ Eslatma qo‘shish")],
+        [KeyboardButton(text="📋 Eslatmalar ro‘yxati")],
+        [KeyboardButton(text="🗑 Eslatmani o‘chirish")],
+        [KeyboardButton(text="⬅️ Ortga")]
+    ],
+    resize_keyboard=True
+)
+
+
+@dp.message(F.text == "🔔 Eslatma sozlash")
+async def reminder_menu_open(message: types.Message):
+    await message.answer("Eslatma menyusi:", reply_markup=reminder_menu)
+
+
+# ================= ESLATMA QO‘SHISH =================
+
+class ReminderState(StatesGroup):
+    time = State()
+
+@dp.message(F.text == "➕ Eslatma qo‘shish")
+async def reminder_add(message: types.Message, state: FSMContext):
+    await message.answer("Vaqt kiriting (HH:MM) masalan 21:00")
+    await state.set_state(ReminderState.time)
+
+
+@dp.message(ReminderState.time)
+async def reminder_save(message: types.Message, state: FSMContext):
+
+    time = message.text
+
+    if len(time) != 5 or time[2] != ":":
+        await message.answer("❗ Format noto‘g‘ri. Masalan 21:00")
+        return
+
+    async with aiosqlite.connect(DB_NAME) as db:
+        await db.execute("""
+        INSERT INTO reminders (user_id, time)
+        VALUES (?, ?)
+        """, (message.from_user.id, time))
+
+        await db.commit()
+
+    await message.answer("✅ Eslatma qo‘shildi", reply_markup=reminder_menu)
+    await state.clear()
+
+# ================= ESLATMA RO‘YXATI =================
+
+@dp.message(F.text == "📋 Eslatmalar ro‘yxati")
+async def reminder_list(message: types.Message):
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        cur = await db.execute("""
+        SELECT time FROM reminders
+        WHERE user_id=?
+        """, (message.from_user.id,))
+
+        times = await cur.fetchall()
+
+    if not times:
+        await message.answer("Eslatmalar mavjud emas.")
+        return
+
+    text = "🔔 Sizning eslatmalaringiz:\n\n"
+
+    for t in times:
+        text += f"⏰ {t[0]}\n"
+
+    await message.answer(text)
+
+
+# ================= ESLATMANI O‘CHIRISH =================
+
+@dp.message(F.text == "🗑 Eslatmani o‘chirish")
+async def reminder_delete(message: types.Message):
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        cur = await db.execute("""
+        SELECT id, time FROM reminders
+        WHERE user_id=?
+        """, (message.from_user.id,))
+
+        data = await cur.fetchall()
+
+    if not data:
+        await message.answer("Eslatmalar mavjud emas.")
+        return
+
+    keyboard = []
+
+    for i in data:
+        keyboard.append([KeyboardButton(text=f"O‘chirish {i[1]}")])
+
+    markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+    await message.answer("Qaysi eslatmani o‘chiramiz?", reply_markup=markup)
+
+
+@dp.message(F.text.startswith("O‘chirish"))
+async def reminder_delete_confirm(message: types.Message):
+
+    time = message.text.split(" ")[1]
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        await db.execute("""
+        DELETE FROM reminders
+        WHERE user_id=? AND time=?
+
 # ================= STATES =================
 
 class ExpenseState(StatesGroup):
@@ -489,154 +603,9 @@ async def yearly_report(message: types.Message):
             text += "\n"
 
             await message.answer(text)
-
-# ================= ESLATMA MENYUSI =================
-
-reminder_menu = ReplyKeyboardMarkup(
-    keyboard=[
-        [KeyboardButton(text="➕ Eslatma qo‘shish")],
-        [KeyboardButton(text="📋 Eslatmalar ro‘yxati")],
-        [KeyboardButton(text="🗑 Eslatmani o‘chirish")],
-        [KeyboardButton(text="⬅️ Ortga")]
-    ],
-    resize_keyboard=True
-)
-
-
-@dp.message(F.text == "🔔 Eslatma sozlash")
-async def reminder_menu_open(message: types.Message):
-    await message.answer("Eslatma menyusi:", reply_markup=reminder_menu)
-
-
-# ================= ESLATMA QO‘SHISH =================
-
-class ReminderState(StatesGroup):
-    time = State()
-
-@dp.message(F.text == "➕ Eslatma qo‘shish")
-async def reminder_add(message: types.Message, state: FSMContext):
-    await message.answer("Vaqt kiriting (HH:MM) masalan 21:00")
-    await state.set_state(ReminderState.time)
-
-
-@dp.message(ReminderState.time)
-async def reminder_save(message: types.Message, state: FSMContext):
-
-    time = message.text
-
-    if len(time) != 5 or time[2] != ":":
-        await message.answer("❗ Format noto‘g‘ri. Masalan 21:00")
-        return
-
-    async with aiosqlite.connect(DB_NAME) as db:
-        await db.execute("""
-        INSERT INTO reminders (user_id, time)
-        VALUES (?, ?)
-        """, (message.from_user.id, time))
-
-        await db.commit()
-
-    await message.answer("✅ Eslatma qo‘shildi", reply_markup=reminder_menu)
-    await state.clear()
-
-
-# ================= ESLATMA RO‘YXATI =================
-
-@dp.message(F.text == "📋 Eslatmalar ro‘yxati")
-async def reminder_list(message: types.Message):
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        cur = await db.execute("""
-        SELECT time FROM reminders
-        WHERE user_id=?
-        """, (message.from_user.id,))
-
-        times = await cur.fetchall()
-
-    if not times:
-        await message.answer("Eslatmalar mavjud emas.")
-        return
-
-    text = "🔔 Sizning eslatmalaringiz:\n\n"
-
-    for t in times:
-        text += f"⏰ {t[0]}\n"
-
-    await message.answer(text)
-
-
-# ================= ESLATMANI O‘CHIRISH =================
-
-@dp.message(F.text == "🗑 Eslatmani o‘chirish")
-async def reminder_delete(message: types.Message):
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        cur = await db.execute("""
-        SELECT id, time FROM reminders
-        WHERE user_id=?
-        """, (message.from_user.id,))
-
-        data = await cur.fetchall()
-
-    if not data:
-        await message.answer("Eslatmalar mavjud emas.")
-        return
-
-    keyboard = []
-
-    for i in data:
-        keyboard.append([KeyboardButton(text=f"O‘chirish {i[1]}")])
-
-    markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
-
-    await message.answer("Qaysi eslatmani o‘chiramiz?", reply_markup=markup)
-
-
-@dp.message(F.text.startswith("O‘chirish"))
-async def reminder_delete_confirm(message: types.Message):
-
-    time = message.text.split(" ")[1]
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        await db.execute("""
-        DELETE FROM reminders
-        WHERE user_id=? AND time=?
-        """, (message.from_user.id, time))
-
-        await db.commit()
-
-        await message.answer("✅ Eslatma o‘chirildi", reply_markup=reminder_menu)
-
-
-# ================= ESLATMA FON TEKSHIRUV =================
-
-async def reminder_checker():
-
-    while True:
-        now = datetime.datetime.now().strftime("%H:%M")
-
-        async with aiosqlite.connect(DB_NAME) as db:
-
-            cur = await db.execute("""
-            SELECT user_id FROM reminders
-            WHERE time=?
-            """, (now,))
-
-            users = await cur.fetchall()
-
-        for u in users:
-            try:
-                await bot.send_message(
-                    u[0],
-                    "🔔 Bugungi xarajatlaringizni yozishni unutmang 🙂"
-                )
-            except:
-                pass
-
-        await asyncio.sleep(60)
+111
+ #
+    
 
 
 # ================= BOTNI ISHGA TUSHIRISH =================
