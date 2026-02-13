@@ -1,39 +1,33 @@
 import asyncio
-import os
+import logging
 
 from aiogram import Bot, Dispatcher
-from aiogram.types import Message
-from aiogram.filters import CommandStart
-from dotenv import load_dotenv
+from aiogram.fsm.storage.memory import MemoryStorage
 
-from database import create_tables, add_user
-from keyboards import menu_keyboard
-
-
-load_dotenv()
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
-
-
-@dp.message(CommandStart())
-async def start_handler(message: Message):
-
-    await add_user(
-        message.from_user.id,
-        message.from_user.username
-    )
-
-    await message.answer(
-        "Salom 👋\nXarajatBotga xush kelibsiz!",
-        reply_markup=menu_keyboard
-    )
+from config import BOT_TOKEN
+from handlers import router
+from database import create_tables
+from scheduler import reminder_loop
 
 
 async def main():
+
+    logging.basicConfig(level=logging.INFO)
+
+    bot = Bot(token=BOT_TOKEN)
+    dp = Dispatcher(storage=MemoryStorage())
+
+    # Router ulash
+    dp.include_router(router)
+
+    # Database yaratish
     await create_tables()
+
+    # Reminder loop ishga tushirish
+    asyncio.create_task(reminder_loop(bot))
+
+    print("Bot ishga tushdi 🚀")
+
     await dp.start_polling(bot)
 
 
