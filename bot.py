@@ -209,6 +209,39 @@ async def reminder_delete_confirm(message: types.Message):
         await db.execute("""
         DELETE FROM reminders
         WHERE user_id=? AND time=?
+        """, (message.from_user.id, time))
+
+        await db.commit()
+
+    await message.answer("✅ Eslatma o‘chirildi", reply_markup=reminder_menu)
+
+
+# ================= ESLATMA FON TEKSHIRUV =================
+
+async def reminder_checker():
+
+    while True:
+        now = datetime.datetime.now().strftime("%H:%M")
+
+        async with aiosqlite.connect(DB_NAME) as db:
+
+            cur = await db.execute("""
+            SELECT user_id FROM reminders
+            WHERE time=?
+            """, (now,))
+
+            users = await cur.fetchall()
+
+        for u in users:
+            try:
+                await bot.send_message(
+                    u[0],
+                    "🔔 Bugungi xarajatlaringizni yozishni unutmang 🙂"
+                )
+            except:
+                pass
+
+        await asyncio.sleep(60)
 
 # ================= STATES =================
 
@@ -602,10 +635,7 @@ async def yearly_report(message: types.Message):
 
             text += "\n"
 
-            await message.answer(text)
-111
- #
-    
+            await message.answer(text) 
 
 
 # ================= BOTNI ISHGA TUSHIRISH =================
