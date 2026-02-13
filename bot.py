@@ -1,22 +1,26 @@
 import asyncio
+import logging
 import datetime
 import aiosqlite
 
-from aiogram import Bot, Dispatcher, F
-from aiogram.types import Message, ReplyKeyboardMarkup, KeyboardButton
-from aiogram.fsm.state import StatesGroup, State
-from aiogram.fsm.context import FSMContext
+from aiogram import Bot, Dispatcher, types, F
+from aiogram.filters import CommandStart
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 
-# ================= CONFIG =================
 TOKEN = "7915188460:AAGtbZw5EyEwjIeSJ1OUkvCq-hvK5s0FfJw"
 
 bot = Bot(token=TOKEN)
 dp = Dispatcher(storage=MemoryStorage())
 
-DB_NAME = "database.db"
+DB_NAME = "xarajat.db"
+
+logging.basicConfig(level=logging.INFO)
 
 # ================= DATABASE =================
+
 async def create_tables():
     async with aiosqlite.connect(DB_NAME) as db:
 
@@ -58,12 +62,13 @@ async def create_tables():
 
         await db.commit()
 
+# ================= USER =================
 
 async def add_user(user_id, username):
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute(
-            "SELECT user_id FROM users WHERE user_id = ?",
+            "SELECT user_id FROM users WHERE user_id=?",
             (user_id,)
         )
         user = await cur.fetchone()
@@ -79,28 +84,111 @@ async def add_user(user_id, username):
             )
             await db.commit()
 
+# ================= MENU =================
 
-async def add_expense(user_id, amount, category):
+main_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="➕ Chiqim qo‘shish")],
+        [KeyboardButton(text="📊 Hisobot")],
+        [KeyboardButton(text="❌ Oxirgi chiqimni bekor qilish")],
+        [KeyboardButton(text="🔔 Eslatma sozlash")]
+    ],
+    resize_keyboard=True
+)
+
+# ================= STATES =================
+
+class ExpenseState(StatesGroup):
+    amount = State()
+    category = State()
+
+# ================= START =================
+
+@dp.message(CommandStart())
+async def start_cmd(message: types.Message):
+    await add_user(message.from_user.id, message.from_user.username)
+
+    await message.answer(
+        "Salom 🙂\nXarajatBot ga xush kelibsiz!",
+        reply_markup=main_menu
+    )
+
+# ================= CHIQIM BOSHLASH =================
+
+@dp.message(F.text == "➕ Chiqim qo‘shish")
+async def expense_start(message: types.Message, state: FSMContext):
+    await message.answer("Bugun qancha pul sarfladingiz?")
+    await state.set_state(ExpenseState.amount)
+
+# ================= SUMMA QABUL QILISH =================
+
+@dp.message(ExpenseState.amount)
+async def expense_amount(message: types.Message, state: FSMContext):
+
+    if not message.text.isdigit():
+        await message.answer("❗ Iltimos faqat son kiriting")
+        return
+
+    await state.update_data(amount=int(message.text))
+
+    # Kategoriyalarni chiqaramiz
+    async with aiosqlite.connect(DB_NAME) as db:
+        cur = await db.execute("""
+        SELECT name FROM categories
+        WHERE user_id=?
+        ORDER BY usage_count DESC
+        """, (message.from_user.id,))
+        cats = await cur.fetchall()
+
+    keyboard = []
+
+    for cat in cats:
+        keyboard.append([KeyboardButton(text=cat[0])])
+
+    markup = ReplyKeyboardMarkup(
+        keyboard=keyboard,
+        resize_keyboard=True
+    ) if keyboard else None
+
+    await message.answer(
+        "Pul nimaga ishlatildi?",
+        reply_markup=markup
+    )
+
+    await state.set_state(ExpenseState.category)
+
+# ================= CHIQIMNI SAQLASH =================
+
+@dp.message(ExpenseState.category)
+async def expense_category(message: types.Message, state: FSMContext):
+
+    data = await state.get_data()
+    amount = data["amount"]
+    category = message.text
+
+    now = datetime.datetime.now()
+    date = now.strftime("%Y-%m-%d")
+    time = now.strftime("%H:%M")
+
     async with aiosqlite.connect(DB_NAME) as db:
 
-        now = datetime.datetime.now()
-
+        # Expense saqlash
         await db.execute("""
-        INSERT INTO expenses(user_id, amount, category, date, time)
-        VALUES(?,?,?,?,?)
+        INSERT INTO expenses (user_id, amount, category, date, time)
+        VALUES (?, ?, ?, ?, ?)
         """, (
-            user_id,
+            message.from_user.id,
             amount,
             category,
-            now.strftime("%Y-%m-%d"),
-            now.strftime("%H:%M")
+            date,
+            time
         ))
 
-        # category statistikasi
+        # Category mavjudligini tekshiramiz
         cur = await db.execute("""
         SELECT id, usage_count FROM categories
-        WHERE user_id = ? AND name = ?
-        """, (user_id, category))
+        WHERE user_id=? AND name=?
+        """, (message.from_user.id, category))
 
         cat = await cur.fetchone()
 
@@ -108,333 +196,379 @@ async def add_expense(user_id, amount, category):
             await db.execute("""
             UPDATE categories
             SET usage_count = usage_count + 1
-            WHERE id = ?
+            WHERE id=?
             """, (cat[0],))
         else:
             await db.execute("""
-            INSERT INTO categories(user_id, name)
-            VALUES(?,?)
-            """, (user_id, category))
+            INSERT INTO categories (user_id, name)
+            VALUES (?, ?)
+            """, (message.from_user.id, category))
 
         await db.commit()
 
-# ================= STATES =================
-class ExpenseState(StatesGroup):
-    waiting_amount = State()
-    waiting_category = State()
-
-
-# ================= KEYBOARDS =================
-def main_menu():
-    return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Chiqim qo‘shish")],
-            [KeyboardButton(text="📊 Hisobot")],
-            [KeyboardButton(text="❌ Oxirgi chiqimni bekor qilish")],
-            [KeyboardButton(text="🔔 Eslatma sozlash")]
-        ],
-        resize_keyboard=True
+    await message.answer(
+        f"✅ Chiqim saqlandi\n💰 {amount:,} so‘m — {category}",
+        reply_markup=main_menu
     )
 
+    await state.clear()
 
-async def category_keyboard(user_id):
+# ================= OXIRGI CHIQIMNI O‘CHIRISH =================
+
+@dp.message(F.text == "❌ Oxirgi chiqimni bekor qilish")
+async def delete_last_expense(message: types.Message):
+
     async with aiosqlite.connect(DB_NAME) as db:
+
         cur = await db.execute("""
-        SELECT name FROM categories
-        WHERE user_id = ?
-        ORDER BY usage_count DESC
-        """, (user_id,))
+        SELECT id FROM expenses
+        WHERE user_id=?
+        ORDER BY id DESC
+        LIMIT 1
+        """, (message.from_user.id,))
 
-        cats = await cur.fetchall()
+        expense = await cur.fetchone()
 
-    buttons = [[KeyboardButton(text=c[0])] for c in cats]
+        if not expense:
+            await message.answer(
+                "⚠️ Sizda hali chiqimlar mavjud emas",
+                reply_markup=main_menu
+            )
+            return
 
-    return ReplyKeyboardMarkup(
-        keyboard=buttons,
-        resize_keyboard=True
+        await db.execute(
+            "DELETE FROM expenses WHERE id=?",
+            (expense[0],)
+        )
+
+        await db.commit()
+
+    await message.answer(
+        "✅ Oxirgi chiqim o‘chirildi",
+        reply_markup=main_menu
     )
 
+# ================= HISOBOT MENYUSI =================
 
-# ================= HISOBOT FUNKSIYALARI =================
-async def today_report(user_id):
+report_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="📅 Kunlik hisobot")],
+        [KeyboardButton(text="📆 Oylik hisobot")],
+        [KeyboardButton(text="📊 Yillik hisobot")],
+        [KeyboardButton(text="⬅️ Ortga")]
+    ],
+    resize_keyboard=True
+)
+
+
+@dp.message(F.text == "📊 Hisobot")
+async def report_menu_open(message: types.Message):
+    await message.answer("Hisobot turini tanlang:", reply_markup=report_menu)
+
+
+@dp.message(F.text == "⬅️ Ortga")
+async def back_main_menu(message: types.Message):
+    await message.answer("Bosh menyu", reply_markup=main_menu)
+
+
+# ================= KUNLIK HISOBOT =================
+
+@dp.message(F.text == "📅 Kunlik hisobot")
+async def daily_report(message: types.Message):
+
     today = datetime.datetime.now().strftime("%Y-%m-%d")
 
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute("""
-        SELECT SUM(amount) FROM expenses
-        WHERE user_id = ? AND date = ?
-        """, (user_id, today))
-
-        total = await cur.fetchone()
-        total = total[0] if total[0] else 0
-
-        cur = await db.execute("""
         SELECT category, SUM(amount)
         FROM expenses
-        WHERE user_id = ? AND date = ?
+        WHERE user_id=? AND date=?
         GROUP BY category
-        """, (user_id, today))
+        """, (message.from_user.id, today))
 
-        rows = await cur.fetchall()
+        data = await cur.fetchall()
 
-    text = f"📅 Bugungi jami chiqim: {total} so‘m\n\n"
-
-    for r in rows:
-        text += f"{r[0]} — {r[1]} so‘m\n"
-
-    return text
-
-
-async def month_report(user_id):
-    month = datetime.datetime.now().strftime("%Y-%m")
-
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        cur = await db.execute("""
-        SELECT SUM(amount) FROM expenses
-        WHERE user_id = ? AND date LIKE ?
-        """, (user_id, f"{month}%"))
-
-        total = await cur.fetchone()
-        total = total[0] if total[0] else 0
-
-        cur = await db.execute("""
-        SELECT category, SUM(amount)
-        FROM expenses
-        WHERE user_id = ? AND date LIKE ?
-        GROUP BY category
-        """, (user_id, f"{month}%"))
-
-        rows = await cur.fetchall()
-
-    text = f"📆 Oylik jami chiqim: {total} so‘m\n\n"
-
-    for r in rows:
-        text += f"{r[0]} — {r[1]} so‘m\n"
-
-    return text
-
-
-# ================= OXIRGI CHIQIMNI O‘CHIRISH =================
-async def delete_last_expense(user_id):
-    async with aiosqlite.connect(DB_NAME) as db:
-
-        cur = await db.execute("""
-        SELECT id FROM expenses
-        WHERE user_id = ?
-        ORDER BY id DESC LIMIT 1
-        """, (user_id,))
-
-        row = await cur.fetchone()
-
-        if not row:
-            return False
-
-        await db.execute("DELETE FROM expenses WHERE id = ?", (row[0],))
-        await db.commit()
-
-        return True
-
-# ================= START =================
-@dp.message(F.text == "/start")
-async def start_cmd(message: Message):
-
-    await add_user(
-        message.from_user.id,
-        message.from_user.username or "NoUsername"
-    )
-
-    await message.answer(
-        "Salom 👋\nXarajatBotga xush kelibsiz!",
-        reply_markup=main_menu()
-    )
-
-
-# ================= CHIQIM BOSHLASH =================
-@dp.message(F.text == "➕ Chiqim qo‘shish")
-async def add_expense_start(message: Message, state: FSMContext):
-
-    await message.answer("Bugun qancha pul sarfladingiz?")
-    await state.set_state(ExpenseState.waiting_amount)
-
-
-# ================= SUMMA QABUL QILISH =================
-@dp.message(ExpenseState.waiting_amount)
-async def get_amount(message: Message, state: FSMContext):
-
-    if not message.text.isdigit():
-        await message.answer("Iltimos faqat raqam kiriting.")
+    if not data:
+        await message.answer("Bugun chiqimlar mavjud emas.")
         return
 
-    await state.update_data(amount=int(message.text))
+    text = "📅 Bugungi hisobot:\n\n"
+    total = 0
 
-    keyboard = await category_keyboard(message.from_user.id)
+    for cat, amount in data:
+        text += f"{cat} — {amount:,} so‘m\n"
+        total += amount
 
-    if keyboard.keyboard:
-        await message.answer(
-            "Pul nimaga ishlatildi?",
-            reply_markup=keyboard
-        )
-    else:
-        await message.answer("Pul nimaga ishlatildi? (nom yozing)")
-
-    await state.set_state(ExpenseState.waiting_category)
-
-# ================= CATEGORY QABUL QILISH =================
-@dp.message(ExpenseState.waiting_category)
-async def get_category(message: Message, state: FSMContext):
-
-    data = await state.get_data()
-    amount = data["amount"]
-    category = message.text
-
-# ================= HISOBOT MENYU =================
-@dp.message(F.text == "📊 Hisobot")
-async def report_menu(message: Message):
-
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="📅 Bugungi hisobot")],
-            [KeyboardButton(text="📆 Oylik hisobot")],
-            [KeyboardButton(text="⬅️ Orqaga")]
-        ],
-        resize_keyboard=True
-    )
-
-    await message.answer("Hisobot turini tanlang:", reply_markup=kb)
-
-
-# ================= BUGUNGI HISOBOT =================
-@dp.message(F.text == "📅 Bugungi hisobot")
-async def today_rep(message: Message):
-
-    text = await today_report(message.from_user.id)
+    text += f"\n💰 Jami: {total:,} so‘m"
 
     await message.answer(text)
 
 
-# ================= OYLIK HISOBOT =================
+# ================= OYLIK HISOBOT (OY RO‘YXATI) =================
+
 @dp.message(F.text == "📆 Oylik hisobot")
-async def month_rep(message: Message):
+async def monthly_report_menu(message: types.Message):
 
-    text = await month_report(message.from_user.id)
+    async with aiosqlite.connect(DB_NAME) as db:
 
-    await message.answer(text)
+        cur = await db.execute("""
+        SELECT DISTINCT substr(date,1,7) AS month
+        FROM expenses
+        WHERE user_id=?
+        ORDER BY month ASC
+        """, (message.from_user.id,))
 
+        months = await cur.fetchall()
 
-# ================= ORQAGA =================
-@dp.message(F.text == "⬅️ Orqaga")
-async def back_menu(message: Message):
+    if not months:
+        await message.answer("Sizda hali oylik ma’lumotlar yo‘q.")
+        return
 
-    await message.answer(
-        "Bosh menyu",
-        reply_markup=main_menu()
-    )
+    keyboard = []
 
+    for m in months:
+        keyboard.append([KeyboardButton(text=m[0])])
 
-    await add_expense(
-        message.from_user.id,
-        amount,
-        category
-    )
-
-    await message.answer(
-        "✅ Chiqim saqlandi",
-        reply_markup=main_menu()
-    )
-
-    await state.clear()
-
-# ================= OXIRGI CHIQIMNI O‘CHIRISH =================
-@dp.message(F.text == "❌ Oxirgi chiqimni bekor qilish")
-async def cancel_last(message: Message):
-
-    ok = await delete_last_expense(message.from_user.id)
-
-    if ok:
-        await message.answer("✅ Oxirgi chiqim o‘chirildi")
-    else:
-        await message.answer("❗ O‘chirish uchun chiqim topilmadi")
-
-
-# ================= ESLATMA SOZLASH =================
-@dp.message(F.text == "🔔 Eslatma sozlash")
-async def reminder_menu(message: Message):
-
-    kb = ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="➕ Vaqt qo‘shish")],
-            [KeyboardButton(text="📋 Vaqtlar ro‘yxati")],
-            [KeyboardButton(text="❌ Vaqtni o‘chirish")],
-            [KeyboardButton(text="⬅️ Orqaga")]
-        ],
+    markup = ReplyKeyboardMarkup(
+        keyboard=keyboard,
         resize_keyboard=True
     )
 
-    await message.answer("Eslatma menyusi:", reply_markup=kb)
+    await message.answer("Oyni tanlang:", reply_markup=markup)
+
+# ================= TANLANGAN OY HISOBOTI =================
+
+@dp.message()
+async def monthly_detail(message: types.Message):
+
+    # Oy format tekshiramiz (YYYY-MM)
+    if len(message.text) == 7 and message.text[4] == "-":
+
+        month = message.text
+
+        async with aiosqlite.connect(DB_NAME) as db:
+
+            # Statistika
+            cur = await db.execute("""
+            SELECT category, SUM(amount)
+            FROM expenses
+            WHERE user_id=? AND substr(date,1,7)=?
+            GROUP BY category
+            """, (message.from_user.id, month))
+
+            stats = await cur.fetchall()
+
+            # Batafsil ro‘yxat
+            cur2 = await db.execute("""
+            SELECT date, category, amount
+            FROM expenses
+            WHERE user_id=? AND substr(date,1,7)=?
+            ORDER BY date ASC
+            """, (message.from_user.id, month))
+
+            details = await cur2.fetchall()
+
+        if not stats:
+            return
+
+        text = f"📆 {month} hisoboti\n\n"
+        total = 0
+
+        for cat, amount in stats:
+            text += f"{cat} — {amount:,} so‘m\n"
+            total += amount
+
+        text += f"\n💰 Jami: {total:,} so‘m\n"
+        text += "\n📋 Batafsil:\n"
+
+        for d, cat, amount in details:
+            day = d[8:]
+            text += f"{day}.{month[5:]} — {cat} — {amount:,}\n"
+
+        await message.answer(text, reply_markup=report_menu)
 
 
-class ReminderState(StatesGroup):
-    waiting_time = State()
+# ================= YILLIK HISOBOT =================
+
+@dp.message(F.text == "📊 Yillik hisobot")
+async def yearly_report(message: types.Message):
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        cur = await db.execute("""
+        SELECT DISTINCT substr(date,1,4) AS year
+        FROM expenses
+        WHERE user_id=?
+        ORDER BY year ASC
+        """, (message.from_user.id,))
+
+        years = await cur.fetchall()
+
+    if not years:
+        await message.answer("Yillik ma’lumot mavjud emas.")
+        return
+
+    text = "📊 Yillik hisobot\n\n"
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        for y in years:
+            year = y[0]
+
+            cur = await db.execute("""
+            SELECT substr(date,6,2) AS month, SUM(amount)
+            FROM expenses
+            WHERE user_id=? AND substr(date,1,4)=?
+            GROUP BY month
+            ORDER BY month ASC
+            """, (message.from_user.id, year))
+
+            months = await cur.fetchall()
+
+            text += f"📅 {year}\n"
+
+            for m, amount in months:
+                text += f"{m}-{year} — {amount:,} so‘m\n"
+
+            text += "\n"
+
+    await message.answer(text)
+
+# ================= ESLATMA MENYUSI =================
+
+reminder_menu = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="➕ Eslatma qo‘shish")],
+        [KeyboardButton(text="📋 Eslatmalar ro‘yxati")],
+        [KeyboardButton(text="🗑 Eslatmani o‘chirish")],
+        [KeyboardButton(text="⬅️ Ortga")]
+    ],
+    resize_keyboard=True
+)
+
+
+@dp.message(F.text == "🔔 Eslatma sozlash")
+async def reminder_menu_open(message: types.Message):
+    await message.answer("Eslatma menyusi:", reply_markup=reminder_menu)
 
 
 # ================= ESLATMA QO‘SHISH =================
-@dp.message(F.text == "➕ Vaqt qo‘shish")
-async def add_reminder_start(message: Message, state: FSMContext):
 
-    await message.answer("Vaqt kiriting (masalan: 21:00)")
-    await state.set_state(ReminderState.waiting_time)
+class ReminderState(StatesGroup):
+    time = State()
 
 
-@dp.message(ReminderState.waiting_time)
-async def save_reminder(message: Message, state: FSMContext):
+@dp.message(F.text == "➕ Eslatma qo‘shish")
+async def reminder_add(message: types.Message, state: FSMContext):
+    await message.answer("Vaqt kiriting (HH:MM) masalan 21:00")
+    await state.set_state(ReminderState.time)
 
-    time_text = message.text
+
+@dp.message(ReminderState.time)
+async def reminder_save(message: types.Message, state: FSMContext):
+
+    time = message.text
+
+    if len(time) != 5 or time[2] != ":":
+        await message.answer("❗ Format noto‘g‘ri. Masalan 21:00")
+        return
 
     async with aiosqlite.connect(DB_NAME) as db:
         await db.execute("""
-        INSERT INTO reminders(user_id, time)
-        VALUES(?,?)
-        """, (message.from_user.id, time_text))
+        INSERT INTO reminders (user_id, time)
+        VALUES (?, ?)
+        """, (message.from_user.id, time))
+
         await db.commit()
 
-    await message.answer("✅ Eslatma qo‘shildi", reply_markup=main_menu())
+    await message.answer("✅ Eslatma qo‘shildi", reply_markup=reminder_menu)
     await state.clear()
 
 
 # ================= ESLATMA RO‘YXATI =================
-@dp.message(F.text == "📋 Vaqtlar ro‘yxati")
-async def reminder_list(message: Message):
+
+@dp.message(F.text == "📋 Eslatmalar ro‘yxati")
+async def reminder_list(message: types.Message):
 
     async with aiosqlite.connect(DB_NAME) as db:
 
         cur = await db.execute("""
-        SELECT time FROM reminders WHERE user_id = ?
+        SELECT time FROM reminders
+        WHERE user_id=?
         """, (message.from_user.id,))
 
-        rows = await cur.fetchall()
+        times = await cur.fetchall()
 
-    if not rows:
-        await message.answer("Eslatma yo‘q")
+    if not times:
+        await message.answer("Eslatmalar mavjud emas.")
         return
 
-    text = "🔔 Eslatmalar:\n\n"
-    for r in rows:
-        text += f"{r[0]}\n"
+    text = "🔔 Sizning eslatmalaringiz:\n\n"
+
+    for t in times:
+        text += f"⏰ {t[0]}\n"
 
     await message.answer(text)
 
-# ================= ESLATMA YUBORISH =================
-async def reminder_scheduler():
-    while True:
 
+# ================= ESLATMANI O‘CHIRISH =================
+
+@dp.message(F.text == "🗑 Eslatmani o‘chirish")
+async def reminder_delete(message: types.Message):
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        cur = await db.execute("""
+        SELECT id, time FROM reminders
+        WHERE user_id=?
+        """, (message.from_user.id,))
+
+        data = await cur.fetchall()
+
+    if not data:
+        await message.answer("Eslatmalar mavjud emas.")
+        return
+
+    keyboard = []
+
+    for i in data:
+        keyboard.append([KeyboardButton(text=f"O‘chirish {i[1]}")])
+
+    markup = ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+    await message.answer("Qaysi eslatmani o‘chiramiz?", reply_markup=markup)
+
+
+@dp.message(F.text.startswith("O‘chirish"))
+async def reminder_delete_confirm(message: types.Message):
+
+    time = message.text.split(" ")[1]
+
+    async with aiosqlite.connect(DB_NAME) as db:
+
+        await db.execute("""
+        DELETE FROM reminders
+        WHERE user_id=? AND time=?
+        """, (message.from_user.id, time))
+
+        await db.commit()
+
+    await message.answer("✅ Eslatma o‘chirildi", reply_markup=reminder_menu)
+
+
+# ================= ESLATMA FON TEKSHIRUV =================
+
+async def reminder_checker():
+
+    while True:
         now = datetime.datetime.now().strftime("%H:%M")
 
         async with aiosqlite.connect(DB_NAME) as db:
 
             cur = await db.execute("""
-            SELECT user_id FROM reminders WHERE time = ?
+            SELECT user_id FROM reminders
+            WHERE time=?
             """, (now,))
 
             users = await cur.fetchall()
@@ -443,7 +577,7 @@ async def reminder_scheduler():
             try:
                 await bot.send_message(
                     u[0],
-                    "🔔 Xarajatlarni yozishni unutmang!"
+                    "🔔 Bugungi xarajatlaringizni yozishni unutmang 🙂"
                 )
             except:
                 pass
@@ -452,11 +586,11 @@ async def reminder_scheduler():
 
 
 # ================= BOTNI ISHGA TUSHIRISH =================
-async def main():
 
+async def main():
     await create_tables()
 
-    asyncio.create_task(reminder_scheduler())
+    asyncio.create_task(reminder_checker())
 
     await dp.start_polling(bot)
 
