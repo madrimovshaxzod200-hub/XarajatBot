@@ -155,7 +155,7 @@ await message.answer(
         reply_markup=markup
     )
 
-    await state.set_state(ExpenseState.category)
+await state.set_state(ExpenseState.category)
 
 # ================= CHIQIMNI SAQLASH =================
 
@@ -170,7 +170,7 @@ async def expense_category(message: types.Message, state: FSMContext):
     date = now.strftime("%Y-%m-%d")
     time = now.strftime("%H:%M")
 
-    async with aiosqlite.connect(DB_NAME) as db:
+async with aiosqlite.connect(DB_NAME) as db:
 
         # Expense saqlash
         await db.execute("""
@@ -206,12 +206,12 @@ async def expense_category(message: types.Message, state: FSMContext):
 
         await db.commit()
 
-    await message.answer(
+        await message.answer(
         f"✅ Chiqim saqlandi\n💰 {amount:,} so‘m — {category}",
         reply_markup=main_menu
-    )
+        )
 
-    await state.clear()
+        await state.clear()
 
 # ================= OXIRGI CHIQIMNI O‘CHIRISH =================
 
